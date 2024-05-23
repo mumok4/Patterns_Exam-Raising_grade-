@@ -1,6 +1,8 @@
-import math
 import time
 import holidays
+import math
+import  datetime
+
 
 class MonthlyCalendar:
     cal_ID = 0  # Define cal_ID as a class-level attribute
@@ -38,7 +40,7 @@ class MonthlyCalendar:
         self.hilightColor = '#FFFF00'
 
         self.link = ''
-        self.offset = 1  # Start the week from Monday
+        self.offset = 2  # Start the week from Monday
         self.weekNumbers = 0
 
         self.weekdays = ('Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс')
@@ -107,7 +109,10 @@ class MonthlyCalendar:
         return html
 
     def leap_year(self, year):
-        return not (year % 4) and (year < 1582 or year % 100 or not (year % 400))
+        if year < 1582:
+            return year % 4 == 0
+        else:
+            return (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0)
 
     def get_weekday(self, year, days):
         a = days
@@ -158,112 +163,84 @@ class MonthlyCalendar:
     def table_head(self, content):
         cols = self.weekNumbers and '8' or '7'
         html = f'<tr><td colspan={cols} class="cssTitle{self.cal_ID}" align=center><b>{content}</b></td></tr><tr>'
-        for i in range(len(self.weekdays)):
-            ind = (i + self.offset) % 7 - 1
-            wDay = self.weekdays[ind]
-            html += self.table_cell(wDay, f'cssHeading{self.cal_ID}')
-        if self.weekNumbers: html += self.table_cell('&nbsp;', f'cssHeading{self.cal_ID}')
-        html += '</tr>'
+        if self.weekNumbers: html += '<td></td>'
+        for wd in self.weekdays:
+            html += f'<td align=center class="cssHeading{self.cal_ID}">{wd}</td>'
+        return html + '</tr>'
+
+    def show(self, size=2):
+        self.__size = size
+
+        if not (1 <= self.year <= 3999):
+            return f'<strong>{self.error[0]}</strong>'
+        if not (1 <= self.month <= 12):
+            return f'<strong>{self.error[1]}</strong>'
+
+        self.__mDays[1] = 28 + self.leap_year(self.year)
+        days = self.__mDays[self.month - 1]
+
+        # Collect holidays
+        holidays_set = self.fetch_holidays()
+
+        # Adjust specDays for holidays
+        for holiday in holidays_set:
+            self.specDays[holiday[0]] = ('#FFDDCC', holiday[1], 'brak')
+
+        # Calendar HTML generation
+        html = self.set_styles()
+        html += '<table border=0 cellpadding=2 cellspacing=1>'
+        html += self.table_head(self.months[self.month - 1] + ' ' + str(self.year))
+        wDay = self.get_weekday(self.year, sum(self.__mDays[:self.month - 1]))
+        wNum = self.get_week(self.year, sum(self.__mDays[:self.month - 1]) + 1)
+
+        html += '<tr>'
+        if self.weekNumbers: html += f'<td align=center class="cssWeeks{self.cal_ID}">{wNum}</td>'
+        for i in range(wDay): html += self.table_cell('&nbsp;', f'cssDays{self.cal_ID}')
+        for i in range(1, days + 1):
+            date = f'{self.year}-{str(self.month).zfill(2)}-{str(i).zfill(2)}'
+            cls = 'cssDays{0}'
+            if i in self.specDays:
+                cls = 'cssHilight{0}'
+            elif (wDay + self.offset) % 7 == 0:
+                cls = 'cssSaturdays{0}'
+            elif (wDay + self.offset) % 7 == 1:
+                cls = 'cssSundays{0}'
+            html += self.table_cell(i, cls.format(self.cal_ID), date)
+            wDay += 1
+            if wDay == 7:
+                wDay = 0
+                wNum += 1
+                html += '</tr><tr>'
+                if i < days and self.weekNumbers:
+                    html += f'<td align=center class="cssWeeks{self.cal_ID}">{wNum}</td>'
+        if wDay:
+            for i in range(7 - wDay): html += self.table_cell('&nbsp;', f'cssDays{self.cal_ID}')
+        html += '</tr></table>'
         return html
-
-    def view_event(self, start, end, color, title, link=''):
-        if start > end: return
-        if start < 1 or start > 31: return
-        if end < 1 or end > 31: return
-        while start <= end:
-            self.specDays[str(start)] = [color, title, link]
-            start += 1
-
-    def add_holiday(self, day, title):
-        if day < 1 or day > 31: return
-        self.holidays.append(day)
-        self.specDays[str(day)] = ['#D3B58A', title, '']
 
     def fetch_holidays(self):
-        """Fetch public holidays for the specified month and year."""
-        try:
-            russia_holidays = holidays.RU(years=self.year)
-            for date, name in russia_holidays.items():
-                if date.month == self.month:
-                    self.add_holiday(date.day, name)
-        except Exception as e:
-            print(f"Error fetching holidays: {e}")
+        self.holidays = holidays.RU(years=self.year)
+        holiday_set = {(day.day, name) for day, name in self.holidays.items() if day.month == self.month}
+        return holiday_set
 
-    def create(self):
-        self.__size = max(self.hFontSize, self.dFontSize, self.wFontSize)
-        date = time.strftime('%Y-%m-%d', time.localtime())
-        (curYear, curMonth, curDay) = [int(v) for v in date.split('-')]
+    def show_week(self, days):
+        week_html = self.set_styles()
+        week_html += '<table border=0 cellpadding=2 cellspacing=1>'
+        week_html += self.table_head('Неделя')
 
-        if self.year < 1 or self.year > 3999:
-            html = f'<b>{self.error[0]}</b>'
-        elif self.month < 1 or self.month > 12:
-            html = f'<b>{self.error[1]}</b>'
-        else:
-            if self.leap_year(self.year):
-                self.__mDays[1] = 29
-            days = sum(self.__mDays[:self.month - 1])
+        week_html += '<tr>'
+        for day in days:
+            day_date = datetime.datetime.strptime(day, '%Y-%m-%d')
+            day_num = day_date.day
+            weekday = day_date.weekday()
 
-            start = self.get_weekday(self.year, days)
-            stop = self.__mDays[self.month - 1]
+            if weekday == 5:  # Saturday
+                cls = 'cssSaturdays{0}'.format(self.cal_ID)
+            elif weekday == 6:  # Sunday
+                cls = 'cssSundays{0}'.format(self.cal_ID)
+            else:
+                cls = 'cssDays{0}'.format(self.cal_ID)
 
-            html = self.set_styles()
-            html += '<table border=1 cellspacing=0 cellpadding=0><tr>'
-            html += f'<td{self.borderColor and f" bgcolor={self.borderColor}"}>'
-            html += '<table border=0 cellspacing=1 cellpadding=3>'
-            title = f'{self.months[self.month - 1]} {self.year}'
-            html += self.table_head(title)
-            daycount = 1
-
-            inThisMonth = self.year == curYear and self.month == curMonth
-
-            if self.weekNumbers:
-                weekNr = self.get_week(self.year, days)
-
-            while daycount <= stop:
-                html += '<tr>'
-                wdays = 0
-
-                for i in range(len(self.weekdays)):
-                    ind = (i + self.offset) % 7
-                    if ind == 6:
-                        cls = 'cssSaturdays'
-                    elif ind == 0:
-                        cls = 'cssSundays'
-                    else:
-                        cls = 'cssDays'
-
-                    style = ''
-                    date = f"{self.year}-{self.month}-{daycount}"
-
-                    if (daycount == 1 and i < start) or daycount > stop:
-                        content = '&nbsp;'
-                    else:
-                        content = str(daycount)
-                        if inThisMonth and daycount == curDay:
-                            style = f'padding:0px;border:3px solid {self.tdBorderColor};'
-                        elif self.year == 1582 and self.month == 10 and daycount == 4:
-                            daycount = 14
-                        daycount += 1
-                        wdays += 1
-
-                    html += self.table_cell(content, f'{cls}{self.cal_ID}', date, style)
-
-                if self.weekNumbers:
-                    if not weekNr:
-                        if self.year == 1:
-                            content = '&nbsp;'
-                        elif self.year == 1583:
-                            content = '52'
-                        else:
-                            content = str(self.get_week(self.year - 1, 365))
-                    elif self.month == 12 and weekNr >= 52 and wdays < 4:
-                        content = '1'
-                    else:
-                        content = str(weekNr)
-
-                    html += self.table_cell(content, f'cssWeeks{self.cal_ID}')
-                    weekNr += 1
-
-                html += '</tr>'
-            html += '</table></td></tr></table>'
-        return html
+            week_html += self.table_cell(day_num, cls, day)
+        week_html += '</tr></table>'
+        return week_html
